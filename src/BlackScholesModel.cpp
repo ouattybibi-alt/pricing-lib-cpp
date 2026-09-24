@@ -71,83 +71,76 @@ double BlackScholesModel::delta(double K, double T, OptionType type) const {
 }
 
 // ===========================================================================
-//  TO IMPLEMENT — the four remaining Greeks
+//  Greeks
 //
-//  Translate each formula below into C++, following the pattern above:
-//    1. call checkContract(K, T)
-//    2. compute what you need (D1, D2, discount factors)
-//    3. return the expression
-//
-//  Reference values at S0=100, K=100, r=5%, q=0, sigma=20%, T=1 are in main.cpp.
+//  Convention: every Greek returns the RAW partial derivative, with no
+//  scaling (no /100 on vega, no /365 on theta, no /10000 on rho).
+//  Scaling belongs to the presentation layer: desks disagree on it, and
+//  finite-difference validation produces the raw derivative anyway.
 // ===========================================================================
 
+//          e^{-qT} n(d1)
+//  Gamma = ---------------          n(.) = normalPDF
+//          S sigma sqrt(T)
+//
+//  No OptionType: differentiating put-call parity twice in S shows that a
+//  call and a put on the same strike share the same gamma.
 double BlackScholesModel::gamma(double K, double T) const {
     checkContract(K, T);
     const double D1  = d1(K, T);
     const double dfQ = std::exp(-q_ * T);
-
-
-    //          e^{-qT} n(d1)
-    //  Gamma = --------------        where n(.) is normalPDF
-    //          S sigma sqrt(T)
-    //
-    //  Note there is no OptionType parameter. Ask yourself why a call and a
-    //  put on the same strike necessarily share the same gamma.
-    //  (Hint: differentiate the put-call parity relation twice in S.)
     return dfQ * normalPDF(D1) / (S0_ * sigma_ * std::sqrt(T));
 }
 
+//  Vega = S e^{-qT} n(d1) sqrt(T)
+//
+//  Per unit of volatility (sigma += 1.00). Divide by 100 for a 1-vol-point
+//  move. Shared by call and put, for the same reason as gamma.
 double BlackScholesModel::vega(double K, double T) const {
     checkContract(K, T);
     const double D1  = d1(K, T);
     const double dfQ = std::exp(-q_ * T);
-    return (S0_ * dfQ * normalPDF(D1) * std::sqrt(T))/100.0;
+    return (S0_ * dfQ * normalPDF(D1) * std::sqrt(T));
 }
 
+//                 S e^{-qT} n(d1) sigma
+//  Theta_call = - ---------------------  - r K e^{-rT} N(d2)  + q S e^{-qT} N(d1)
+//                      2 sqrt(T)
+//
+//                 S e^{-qT} n(d1) sigma
+//  Theta_put  = - ---------------------  + r K e^{-rT} N(-d2) - q S e^{-qT} N(-d1)
+//                      2 sqrt(T)
+//
+//  Per YEAR. Divide by 365 (or 252) for a per-day figure.
+//  The first term is common to call and put and always negative: time decay
+//  of optionality. The remaining terms are the carry.
 double BlackScholesModel::theta(double K, double T, OptionType type) const {
     checkContract(K, T);
-
     const double D1  = d1(K, T);
     const double D2  = d2(K, T);
     const double dfR = std::exp(-r_ * T);
     const double dfQ = std::exp(-q_ * T);
     const double common = -(S0_ * dfQ * normalPDF(D1) * sigma_) / (2.0 * std::sqrt(T));
-
-    if (type == OptionType::Call) {
+    if(type == OptionType::Call){
         return common - r_ * K * dfR * normalCDF(D2) + q_ * S0_ * dfQ * normalCDF(D1);
+    } else {
+        return common + r_ * K * dfR * normalCDF(-D2) - q_ * S0_ * dfQ * normalCDF(-D1);
     }
-
-    // Put theta
-    return common + r_ * K * dfR * normalCDF(-D2) - q_ * S0_ * dfQ * normalCDF(-D1);
-    //                 S e^{-qT} n(d1) sigma
-    //  Theta_call = - ---------------------  - r K e^{-rT} N(d2)  + q S e^{-qT} N(d1)
-    //                      2 sqrt(T)
-    //
-    //                 S e^{-qT} n(d1) sigma
-    //  Theta_put  = - ---------------------  + r K e^{-rT} N(-d2) - q S e^{-qT} N(-d1)
-    //                      2 sqrt(T)
-    //
-    //  Returned per YEAR. Divide by 365 for the usual per-day quote.
-    //  The first term is common to both and is always negative: that is
-    //  time decay of optionality. The other terms are the carry.
 }
 
+//  Rho_call =   K T e^{-rT} N(d2)
+//  Rho_put  = - K T e^{-rT} N(-d2)
+//
+//  Per unit of rate (r += 100%). Divide by 10000 for a 1bp move.
 double BlackScholesModel::rho(double K, double T, OptionType type) const {
     checkContract(K, T);
-
-    const double D2 = d2(K, T);
+    const double D2  = d2(K, T);
     const double dfR = std::exp(-r_ * T);
-
-    if (type == OptionType::Call) {
+    if(type == OptionType::Call){
         return K * T * dfR * normalCDF(D2);
+    } else {
+        return -K * T * dfR * normalCDF(-D2);
     }
-
-    // Put rho
-    return -K * T * dfR * normalCDF(-D2);
-    //  Rho_call =   K T e^{-rT} N(d2)
-    //  Rho_put  = - K T e^{-rT} N(-d2)
-    //
-    //  Per unit of rate (i.e. +100%). Divide by 10000 for a 1bp move.
 }
 
 }  // namespace quant
